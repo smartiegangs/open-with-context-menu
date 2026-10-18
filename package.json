@@ -2,7 +2,7 @@
   "name": "open-with-context-menu",
   "displayName": "Open Files Externally",
   "description": "Add context menu items to open files with external applications. Configure multiple apps and file type associations.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "tarikkavaz",
   "engines": {
     "vscode": "^1.60.0"
@@ -93,6 +93,6 @@
   "license": "MIT",
   "icon": "icon.png",
   "devDependencies": {
-    "@vscode/vsce": "^2.22.0"
+    "@vscode/vsce": "^4.0.0"
   }
 }

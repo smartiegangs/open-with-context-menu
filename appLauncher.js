@@ -1,4 +1,4 @@
-const { exec } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 
 /**
@@ -9,70 +9,56 @@ const path = require('path');
  * @returns {Promise<void>}
  */
 function launchApp(appName, appPath, filePath) {
-  return new Promise((resolve, reject) => {
-    const platform = process.platform;
-    let command;
+  if (!appName && !appPath) {
+    return Promise.reject(new Error('Either appName or appPath must be provided'));
+  }
 
-    // Normalize file path for the platform
-    const normalizedFilePath = path.normalize(filePath);
+  const normalizedFilePath = path.normalize(filePath);
+  const platform = process.platform;
+  let command;
+  let args;
+  let fallbackToXdgOpen = false;
 
-    if (appPath) {
-      // Use provided path
-      if (platform === 'win32') {
-        // Windows: use start command
-        const escapedAppPath = appPath.replace(/"/g, '""');
-        const escapedFilePath = normalizedFilePath.replace(/"/g, '""');
-        command = `start "" "${escapedAppPath}" "${escapedFilePath}"`;
-      } else if (platform === 'darwin') {
-        // macOS: use open command with path
-        const escapedAppPath = appPath.replace(/"/g, '\\"');
-        const escapedFilePath = normalizedFilePath.replace(/"/g, '\\"');
-        command = `open -a "${escapedAppPath}" "${escapedFilePath}"`;
-      } else {
-        // Linux: execute directly
-        const escapedAppPath = appPath.replace(/"/g, '\\"');
-        const escapedFilePath = normalizedFilePath.replace(/"/g, '\\"');
-        command = `"${escapedAppPath}" "${escapedFilePath}"`;
-      }
-    } else if (appName) {
-      // Use app name
-      if (platform === 'win32') {
-        // Windows: try to find and launch by name
-        // First try with .exe extension
-        const appNameWithExt = appName.endsWith('.exe') ? appName : `${appName}.exe`;
-        const escapedFilePath = normalizedFilePath.replace(/"/g, '""');
-        command = `start "" "${appNameWithExt}" "${escapedFilePath}"`;
-      } else if (platform === 'darwin') {
-        // macOS: use open -a with app bundle name
-        const escapedAppName = appName.replace(/"/g, '\\"');
-        const escapedFilePath = normalizedFilePath.replace(/"/g, '\\"');
-        command = `open -a "${escapedAppName}" "${escapedFilePath}"`;
-      } else {
-        // Linux: try to execute app name directly, fallback to xdg-open
-        const escapedAppName = appName.replace(/"/g, '\\"');
-        const escapedFilePath = normalizedFilePath.replace(/"/g, '\\"');
-        // Try executing the app name directly first
-        // If that fails, xdg-open will be used as fallback
-        command = `"${escapedAppName}" "${escapedFilePath}" 2>/dev/null || xdg-open "${escapedFilePath}"`;
-      }
-    } else {
-      reject(new Error('Either appName or appPath must be provided'));
-      return;
+  if (platform === 'darwin') {
+    command = 'open';
+    args = ['-a', appPath || appName, normalizedFilePath];
+  } else {
+    command = appPath || appName;
+    args = [normalizedFilePath];
+    fallbackToXdgOpen = platform === 'linux' && !appPath && Boolean(appName);
+    if (platform === 'win32' && !appPath && !command.toLowerCase().endsWith('.exe')) {
+      command += '.exe';
     }
+  }
 
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        // On Linux with appName, the command uses || fallback, so check exit code
-        if (platform === 'linux' && !appPath && appName) {
-          // If exit code is 0 or 1 (common for || fallback), consider it success
-          if (error.code === 0 || error.code === 1) {
-            resolve();
-            return;
-          }
-        }
-        reject(new Error(`Failed to launch application: ${error.message}`));
+  return spawnApplication(command, args, fallbackToXdgOpen, normalizedFilePath);
+}
+
+function spawnApplication(command, args, fallbackToXdgOpen, filePath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore'
+    });
+    let settled = false;
+
+    child.once('error', error => {
+      if (fallbackToXdgOpen && error.code === 'ENOENT') {
+        spawnApplication('xdg-open', [filePath], false, filePath)
+          .then(resolve)
+          .catch(reject);
         return;
       }
+
+      if (!settled) {
+        settled = true;
+        reject(new Error(`Failed to launch application: ${error.message}`));
+      }
+    });
+
+    child.once('spawn', () => {
+      settled = true;
+      child.unref();
       resolve();
     });
   });
